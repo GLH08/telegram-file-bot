@@ -1,0 +1,20 @@
+services:
+  telegram-file-bot:
+    build: .
+    container_name: telegram-file-bot
+    volumes:
+      - ./downloads:/app/downloads
+    restart: unless-stopped
+    environment:
+      - BOT_TOKEN=${BOT_TOKEN}
+      - API_ID=${API_ID}
+      - API_HASH=${API_HASH}
+      - ALLOWED_USERS=${ALLOWED_USERS}
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: '1G'
+        reservations:
+          cpus: '0.25'
+          memory: '256M'
