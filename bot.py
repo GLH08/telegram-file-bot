@@ -3,7 +3,7 @@ import asyncio
 import logging
 from datetime import datetime
 from dotenv import load_dotenv
-from telethon import TelegramClient, events
+from telethon import TelegramClient, events, Button
 from telethon.tl.types import DocumentAttributeFilename, Message, MessageMediaPhoto
 from telethon.errors import FloodWaitError
 
@@ -68,7 +68,7 @@ This bot helps you manage file downloads:
 
 Commands:
 - /start - Show this help message
-- /list [page] - List downloaded files (paginated)
+- /list - List downloaded files (paginated)
 - /rename <index> <new name> - Rename a file
 - /delete <index> - Delete a file
 - /cancel <download_id> - Cancel an active download
@@ -86,14 +86,26 @@ Files are stored by date (YYYYMMDD/filename)
 
 @create_command_handler(r'/list(?: (\d+))?')
 async def list_command(event):
-    page = int(event.pattern_match.group(1) or 1)
+    # Get page number from command or callback data
+    if hasattr(event, 'data') and event.data:
+        # This is a callback query
+        page = int(event.data.decode('utf-8').split('_')[1])
+        is_callback = True
+    else:
+        # This is a regular command
+        page = int(event.pattern_match.group(1) or 1)
+        is_callback = False
+    
     page_size = 10
     start_idx = (page - 1) * page_size
     
     files = file_manager.list_files()
     
     if not files:
-        await event.respond("No files have been downloaded yet.")
+        if is_callback:
+            await event.edit("No files have been downloaded yet.")
+        else:
+            await event.respond("No files have been downloaded yet.")
         return
     
     total_pages = (len(files) + page_size - 1) // page_size
@@ -104,10 +116,50 @@ async def list_command(event):
         response += f"{idx}. `{file_info['relative_path']}`\n"
         response += f"   Size: {file_info['size']}\n\n"
     
-    if page < total_pages:
-        response += f"Use `/list {page+1}` to see the next page."
+    # Create pagination buttons
+    buttons = []
+    row = []
     
-    await event.respond(response)
+    # Previous page button
+    if page > 1:
+        row.append(Button.inline("◀️ Prev", f"page_{page-1}"))
+    
+    # Page numbers
+    # Show max 5 page numbers, centered around current page
+    max_buttons = 5
+    start_page = max(1, min(page - max_buttons//2, total_pages - max_buttons + 1))
+    end_page = min(total_pages, start_page + max_buttons - 1)
+    start_page = max(1, end_page - max_buttons + 1)  # Adjust start page if needed
+    
+    for p in range(start_page, end_page + 1):
+        # Highlight current page
+        if p == page:
+            row.append(Button.inline(f"[{p}]", f"page_{p}"))
+        else:
+            row.append(Button.inline(f"{p}", f"page_{p}"))
+    
+    # Next page button
+    if page < total_pages:
+        row.append(Button.inline("Next ▶️", f"page_{page+1}"))
+    
+    if row:  # Only add buttons if there are any
+        buttons.append(row)
+    
+    if is_callback:
+        await event.edit(response, buttons=buttons)
+    else:
+        await event.respond(response, buttons=buttons)
+
+# Handle pagination button clicks
+@bot.on(events.CallbackQuery(pattern=r"page_(\d+)"))
+async def page_callback(event):
+    if not is_user_allowed(event.sender_id):
+        await event.answer("⛔ You are not authorized to use this bot.")
+        return
+    
+    # Call the list command with the callback event
+    await list_command(event)
+    await event.answer()  # Remove loading indicator
 
 @create_command_handler(r'/rename (\d+) (.+)')
 async def rename_command(event):
